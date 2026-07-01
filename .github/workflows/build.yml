@@ -11,28 +11,40 @@ permissions:
   contents: write
 
 jobs:
+  # 1) Compile le homebrew avec le toolchain devkitARM (image officielle).
   build:
     runs-on: ubuntu-latest
-    env:
-      DEBIAN_FRONTEND: noninteractive
-      DEVKITPRO: /opt/devkitpro
-      DEVKITARM: /opt/devkitpro/devkitARM
-
+    container: devkitpro/devkitarm:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install devkitPro (3ds-dev)
-        run: |
-          set -eux
-          sudo apt-get update
-          sudo apt-get install -y wget gnupg
-          wget -q https://apt.devkitpro.org/install-devkitpro-pacman
-          chmod +x install-devkitpro-pacman
-          sudo ./install-devkitpro-pacman
-          sudo dkp-pacman -Sy --noconfirm
-          sudo dkp-pacman -S  --noconfirm --needed 3ds-dev
-          echo "/opt/devkitpro/tools/bin" >> "$GITHUB_PATH"
+      - name: Build .3dsx
+        run: make
+
+      - name: Upload build outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncch-inputs
+          path: |
+            *.3dsx
+            *.elf
+            *.smdh
+
+  # 2) Empaquette en .cia avec makerom (hors conteneur : glibc recente OK)
+  #    et publie la release. makerom n'a besoin que de l'elf/smdh/banner/rsf.
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: ncch-inputs
+          path: .
 
       - name: Install makerom
         run: |
@@ -41,15 +53,18 @@ jobs:
           curl -sL -o makerom.zip \
             https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.19.0/makerom-v0.19.0-ubuntu_x86_64.zip
           unzip -q makerom.zip
-          sudo install -Dm755 "$(find . -name makerom -type f | head -n1)" /opt/devkitpro/tools/bin/makerom
+          sudo install -Dm755 "$(find . -name makerom -type f | head -n1)" /usr/local/bin/makerom
 
-      - name: Build .3dsx and .cia
+      - name: Package .cia
         run: |
           set -eux
-          make
-          make cia
+          elf="$(ls *.elf | head -n1)"
+          smdh="$(ls *.smdh | head -n1)"
+          makerom -f cia -o 3ds-app-test.cia -target t -exefslogo \
+            -rsf tools/stereo-cube.rsf \
+            -elf "$elf" -icon "$smdh" -banner banner.bnr
 
-      - name: Upload build artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: 3ds-app-test

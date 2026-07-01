@@ -1,10 +1,20 @@
 #include <3ds.h>
 #include <citro3d.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "vshader_shbin.h"
 
 #define CLEAR_COLOR 0x101018FF   // bleu nuit (RGBA8)
+
+// Gyroscope : sensibilite (rad ajoutes par unite de vitesse angulaire brute)
+// et zone morte pour ignorer la derive/le bruit au repos.
+#define GYRO_SENS      (1.0f / 10000.0f)
+#define GYRO_DEADZONE  16
+
+// Head-tracking (New 3DS) : amplitude du deplacement lateral de la camera
+// en fonction de la position de la tete (unites monde). Signe = sens.
+#define HEAD_PARALLAX  0.8f
 
 // Flags de transfert GPU -> framebuffer (config standard des exemples citro3d)
 #define DISPLAY_TRANSFER_FLAGS \
@@ -57,6 +67,9 @@ static void* vbo_data;
 
 static float angleX = 0.0f, angleY = 0.0f;
 
+static bool  qtmReady = false;   // head-tracking dispo (New 3DS)
+static float headX    = 0.0f;    // position horizontale de la tete, lissee (~ -1..1)
+
 // Rendu d'une "vue" (un œil). iod = décalage inter-oculaire :
 //  0 pour l'écran du bas / 2D, +/- valeur pour l'œil droit/gauche en 3D.
 static void sceneRender(float iod)
@@ -66,9 +79,10 @@ static void sceneRender(float iod)
 		C3D_AspectRatioTop, 0.01f, 1000.0f, iod, 2.0f, false);
 
 	// Matrice modèle+vue : on recule le cube et on le fait tourner.
+	// Le décalage X suit la tête (head-tracking) -> parallaxe de mouvement.
 	C3D_Mtx modelView;
 	Mtx_Identity(&modelView);
-	Mtx_Translate(&modelView, 0.0f, 0.0f, -2.5f, true);
+	Mtx_Translate(&modelView, -headX * HEAD_PARALLAX, 0.0f, -2.5f, true);
 	Mtx_RotateX(&modelView, angleX, true);
 	Mtx_RotateY(&modelView, angleY, true);
 
@@ -128,28 +142,56 @@ int main()
 	// Gyroscope (renvoie 0 sur émulateur, actif sur vraie console).
 	HIDUSER_EnableGyroscope();
 
+	// Head-tracking : uniquement sur New 3DS (service QTM absent ailleurs).
+	bool isNew3DS = false;
+	APT_CheckNew3DS(&isNew3DS);
+	if (isNew3DS && R_SUCCEEDED(qtmInit(QTM_SERVICE_USER)))
+		qtmReady = true;
+
 	printf("\x1b[1;1HCube 3D stereoscopique - citro3d");
 	printf("\x1b[3;1HSTART : quitter");
 	printf("\x1b[4;1HCurseur 3D : profondeur");
 	printf("\x1b[5;1HGyroscope : incline la console");
+	printf("\x1b[6;1HTete (New 3DS) : bouge la tete !");
 
 	while (aptMainLoop())
 	{
 		hidScanInput();
 		if (hidKeysDown() & KEY_START) break;
 
-		// Rotation automatique + apport du gyroscope.
+		// Rotation automatique + apport (doux) du gyroscope, avec zone morte.
 		angleY += 0.02f;
 		angularRate gyro;
 		hidGyroRead(&gyro);
-		angleX += gyro.x / 3000.0f;
-		angleY += gyro.y / 3000.0f;
+		if (abs(gyro.x) > GYRO_DEADZONE) angleX += gyro.x * GYRO_SENS;
+		if (abs(gyro.y) > GYRO_DEADZONE) angleY += gyro.y * GYRO_SENS;
+
+		// Head-tracking New 3DS : la caméra de la scène suit ta tête (parallaxe).
+		if (qtmReady)
+		{
+			QtmTrackingData td;
+			if (R_SUCCEEDED(QTMU_GetTrackingData(&td)) && td.headTracked && td.confidenceLevel > 0.0f)
+			{
+				// Milieu des deux yeux, X normalisé (~ -1 gauche .. +1 droite).
+				float ex = 0.5f * (td.eyeCameraCoordinates[QTM_EYE_LEFT][0]
+				                 + td.eyeCameraCoordinates[QTM_EYE_RIGHT][0]);
+				headX += (ex - headX) * 0.25f;    // lissage
+			}
+			else
+			{
+				headX += (0.0f - headX) * 0.1f;   // recentrage doux si tête perdue
+			}
+		}
 
 		// Le curseur 3D physique règle la force du relief (0 = 2D).
 		float slider = osGet3DSliderState();
 		float iod = slider / 3.0f;
 
 		printf("\x1b[7;1HCurseur 3D : %.2f   ", slider);
+		if (qtmReady)
+			printf("\x1b[8;1HHead-tracking : ON   x=%+.2f  ", headX);
+		else
+			printf("\x1b[8;1HHead-tracking : indisponible ");
 
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 			C3D_RenderTargetClear(targetLeft, C3D_CLEAR_ALL, CLEAR_COLOR, 0);
@@ -166,6 +208,7 @@ int main()
 	}
 
 	// Nettoyage.
+	if (qtmReady) qtmExit();
 	HIDUSER_DisableGyroscope();
 	linearFree(vbo_data);
 	shaderProgramFree(&program);

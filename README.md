@@ -12,9 +12,13 @@ Les builds sont publiés automatiquement dans les [Releases](../../releases) :
 ## Build local
 
 Nécessite [devkitPro](https://devkitpro.org/) (package *3DS Development*).
-Pour le `.cia`, il faut aussi `makerom` et `bannertool` dans `devkitPro/tools/bin`.
+Pour le `.cia`, il faut aussi `makerom` dans `devkitPro/tools/bin`.
 
 ```sh
 make        # -> .3dsx
-make cia    # -> .cia
+make cia    # -> .cia (utilise banner.bnr, déjà versionné)
 ```
+
+`banner.bnr` est committé pour que la CI n'ait pas besoin de `bannertool`.
+Pour le régénérer après modif de `banner.png` / `banner.wav` :
+`make banner` (nécessite `bannertool`).

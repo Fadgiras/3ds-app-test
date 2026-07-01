@@ -161,16 +161,19 @@ all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
 #---------------------------------------------------------------------------------
 # Genere un .cia installable (necessite makerom + bannertool)
 #---------------------------------------------------------------------------------
-cia: all $(BUILD)/banner.bnr
+cia: all banner.bnr
 	@echo makerom $(TARGET).cia
 	@$(MAKEROM) -f cia -o $(OUTPUT).cia -target t -exefslogo \
 		-rsf $(CURDIR)/tools/stereo-cube.rsf \
-		-elf $(OUTPUT).elf -icon $(OUTPUT).smdh -banner $(BUILD)/banner.bnr
+		-elf $(OUTPUT).elf -icon $(OUTPUT).smdh -banner banner.bnr
 	@echo "built ... $(TARGET).cia"
 
-$(BUILD)/banner.bnr: banner.png banner.wav | $(BUILD)
+# banner.bnr est versionne pour que la CI n'ait pas besoin de bannertool.
+# Relancer 'make banner' uniquement si banner.png / banner.wav changent.
+.PHONY: banner
+banner:
 	@echo bannertool banner.bnr
-	@$(BANNERTOOL) makebanner -i banner.png -a banner.wav -o $@
+	@$(BANNERTOOL) makebanner -i banner.png -a banner.wav -o banner.bnr
 
 $(BUILD):
 	@mkdir -p $@

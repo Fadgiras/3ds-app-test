@@ -1,0 +1,7 @@
+# Artefacts de build devkitPro
+build/
+*.3dsx
+*.elf
+*.smdh
+*.cia
+*.map
